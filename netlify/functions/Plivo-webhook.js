@@ -1,5 +1,4 @@
 const https = require('https');
-const querystring = require('querystring');
 
 exports.handler = async (event, context) => {
   // Only allow POST requests
@@ -11,21 +10,22 @@ exports.handler = async (event, context) => {
   }
 
   try {
+    console.log('Raw webhook body:', event.body);
+    
     // Parse the incoming Plivo webhook data
     const plivoData = JSON.parse(event.body);
+    console.log('Parsed Plivo data:', plivoData);
     
     // Extract relevant information from Plivo webhook
-    const {
-      From: callerNumber,
-      To: receivedNumber,
-      RecordUrl: recordingUrl,
-      TranscriptionText: transcription,
-      CallUUID: callId,
-      RecordFile: recordingFile
-    } = plivoData;
+    // Handle both uppercase and lowercase field names
+    const callerNumber = plivoData.From || plivoData.from;
+    const receivedNumber = plivoData.To || plivoData.to;
+    const recordingUrl = plivoData.RecordUrl || plivoData.record_url;
+    const transcription = plivoData.TranscriptionText || plivoData.transcription_text;
+    const callId = plivoData.CallUUID || plivoData.call_uuid;
+    const recordingFile = plivoData.RecordFile || plivoData.record_file;
 
     // Determine recipient based on the number called
-    // You'll need to customize this mapping
     const recipientMap = {
       '+1234567890': 'sales@beethovenathome.com',
       '+1234567891': 'support@beethovenathome.com',
@@ -71,7 +71,7 @@ You can listen to the recording at: ${recordingUrl}
 <p><a href="${recordingUrl}" style="background-color: #007cba; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Listen to Recording</a></p>
     `;
 
-    // Prepare Mandrill API request
+    // Prepare Mandrill API request with correct field names
     const mandrillData = {
       key: process.env.MANDRILL_API_KEY,
       message: {
@@ -89,8 +89,7 @@ You can listen to the recording at: ${recordingUrl}
         important: true,
         track_opens: true,
         track_clicks: true,
-        auto_text: true,
-        inline_css: true
+        auto_html: true
       }
     };
 
@@ -151,15 +150,18 @@ function sendMandrillEmail(data) {
       });
       
       res.on('end', () => {
+        // Improved error handling for non-JSON responses
+        let parsedResponse;
         try {
-          const parsedResponse = JSON.parse(responseData);
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            resolve(parsedResponse);
-          } else {
-            reject(new Error(`Mandrill API error: ${responseData}`));
-          }
+          parsedResponse = JSON.parse(responseData);
         } catch (parseError) {
-          reject(new Error(`Failed to parse Mandrill response: ${parseError.message}`));
+          return reject(new Error(`Mandrill non-JSON response: ${responseData}`));
+        }
+
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(parsedResponse);
+        } else {
+          reject(new Error(`Mandrill API error (${res.statusCode}): ${responseData}`));
         }
       });
     });
